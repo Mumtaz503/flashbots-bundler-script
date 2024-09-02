@@ -1,94 +1,123 @@
-const { ethers, Wallet } = require( "ethers" );
-const { FlashbotsBundleProvider, FlashbotsBundleResolution } = require( "@flashbots/ethers-provider-bundle" );
-require( "dotenv" ).config();
+const { ethers, Wallet, AbiCoder } = require("ethers");
+const {
+  FlashbotsBundleProvider,
+  FlashbotsBundleResolution,
+} = require("@flashbots/ethers-provider-bundle");
+require("dotenv").config();
 
-const provider = new ethers.JsonRpcProvider( process.env.SEPOLIA_RPC_URL );
-const webSocketProvider = new ethers.WebSocketProvider( process.env.SEPOLIA_WEB_SOCKET );
+const provider = new ethers.JsonRpcProvider(process.env.SEPOLIA_RPC_URL);
+const abiCoder = AbiCoder.defaultAbiCoder();
+const privateKeys = [process.env.PRIVATE_KEY_1, process.env.PRIVATE_KEY_2];
 
-const ADDRESS = "0x70cf5eCf9c36024C56a19242FE8bb596bB700589";
+const TOKEN = "0x8603e8AEb8cAf32E630BcEBB856e68e030D31078";
+const TOKEN_ABI = ["event TradingOpen(bool tradingOpen_)"];
+const WETH = "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9";
+const UNISWAP_ROUTER_ADDRESS = "0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008";
+const funcSelector = ethers
+  .id("swapExactETHForTokens(uint256,address[],address,uint256)")
+  .slice(0, 10);
 
-const authSigner = new Wallet( process.env.PRIVATE_KEY, provider );
+const tokenContract = new ethers.Contract(TOKEN, TOKEN_ABI, provider);
+
+const signers = privateKeys.map(
+  (privateKey) => new Wallet(privateKey, provider)
+);
 const sepoliaFlashbotsRelay = "https://relay-sepolia.flashbots.net";
 
-const functionSignature = 'decimals()';
-const functionSignatureHash = ethers.keccak256( ethers.toUtf8Bytes( functionSignature ) );
-const functionSelector = functionSignatureHash.slice( 0, 10 ); //first 4 bytes represent the function selector
+const startTransmission = async () => {
+  const flashbotsProvider = await FlashbotsBundleProvider.create(
+    provider,
+    signers[1],
+    sepoliaFlashbotsRelay
+  );
 
-const startTransmission = async () =>
-{
-    const flashbotsProvider = await FlashbotsBundleProvider.create( provider, authSigner, sepoliaFlashbotsRelay );
+  const GWEI = BigInt(10 ** 10);
+  const LEGACY_GAS_PRICE = GWEI * 30n;
+  const PRIORITY_FEE = GWEI * 20n;
+  const blockNumber = await provider.getBlockNumber();
+  const block = await provider.getBlock();
+  const maxBaseFeeInFutureBlock =
+    FlashbotsBundleProvider.getMaxBaseFeeInFutureBlock(block.baseFeePerGas, 6);
 
-    const GWEI = BigInt( 10 ** 10 );
-    const LEGACY_GAS_PRICE = GWEI * 30n;
-    const PRIORITY_FEE = GWEI * 13n;
-    const blockNumber = await provider.getBlockNumber();
-    const block = await provider.getBlock();
-    const maxBaseFeeInFutureBlock = FlashbotsBundleProvider.getMaxBaseFeeInFutureBlock( block.baseFeePerGas, 6 );
-    const payLoad = functionSelector;
+  console.log(`Max fee in future Block: ${String(maxBaseFeeInFutureBlock)}`);
 
-    console.log( `Max fee in future Block: ${String( maxBaseFeeInFutureBlock )}` );
+  const transactions = signers.map((signer) => {
+    const data = abiCoder.encode(
+      ["uint256", "address[]", "address", "uint256"],
+      [
+        10,
+        [WETH, TOKEN],
+        signer.address,
+        Math.floor(Date.now() / 1000) + 60 * 20,
+      ]
+    );
+    const txData = funcSelector + data.slice(2);
+    const swapTransaction = {
+      to: UNISWAP_ROUTER_ADDRESS,
+      type: 2,
+      maxFeePerGas: PRIORITY_FEE + maxBaseFeeInFutureBlock,
+      maxPriorityFeePerGas: PRIORITY_FEE,
+      data: txData,
+      chainId: 11155111,
+      gasLimit: 500000,
+      value: ethers.parseEther("0.00005"),
+    };
+    return {
+      signer: signer,
+      transaction: swapTransaction,
+    };
+  });
 
-    const signedTransactions = await flashbotsProvider.signBundle( [
-        {
-            signer: authSigner,
-            transaction: {
-                to: ADDRESS,
-                type: 2,
-                maxFeePerGas: PRIORITY_FEE + maxBaseFeeInFutureBlock,
-                maxPriorityFeePerGas: PRIORITY_FEE,
-                data: payLoad,
-                chainId: 11155111,
-                // value: ethers.parseEther(amountInEther),
-            },
-        },
-        {
-            signer: authSigner,
-            transaction: {
-                to: ADDRESS,
-                gasPrice: LEGACY_GAS_PRICE,
-                data: payLoad,
-                // value: ethers.parseEther(amountInEther),
-                chainId: 11155111
-            }
-        }
-    ] );
+  const signedTransactions = await flashbotsProvider.signBundle(transactions);
 
-    console.log( "Date Before: ", new Date() );
-    console.log( "Running simulation" );
+  console.log("Date Before: ", new Date());
+  console.log("Running simulation");
 
-    const simulation = await flashbotsProvider.simulate( signedTransactions, blockNumber + 1 );
-    console.log( "Date After: ", new Date() );
+  const simulation = await flashbotsProvider.simulate(
+    signedTransactions,
+    blockNumber + 1
+  );
+  console.log("Date After: ", new Date());
 
-    if ( simulation.firstRevert )
-    {
-        console.error( `Simulation Error: ${simulation.firstRevert.error}` );
-    } else
-    {
-        console.log( `Simulation success. Block Number ${blockNumber}` );
+  if (simulation.firstRevert) {
+    console.error(`Simulation Error: ${simulation.firstRevert.error}`);
+    process.exit(0);
+  } else {
+    console.log(`Simulation success. Block Number ${blockNumber}`);
+  }
+
+  for (let i = 1; i <= 2; i++) {
+    const bundleSubmission = await flashbotsProvider.sendRawBundle(
+      signedTransactions,
+      blockNumber + i
+    );
+    console.log(
+      `Bundle Submitted awaiting response, ${bundleSubmission.bundleHash}`
+    );
+
+    const waitRes = await bundleSubmission.wait();
+    console.log(`Wait response: ${FlashbotsBundleResolution[waitRes]}`);
+
+    if (
+      waitRes === FlashbotsBundleResolution.BundleIncluded ||
+      waitRes === FlashbotsBundleResolution.AccountNonceTooHigh
+    ) {
+      console.log("Bundle included");
+      process.exit(0);
+    } else {
+      console.log({
+        bundleStats: await flashbotsProvider.getBundleStatsV2(
+          simulation.bundleHash,
+          blockNumber + 1
+        ),
+        userStats: await flashbotsProvider.getUserStatsV2(),
+      });
     }
-
-    // Send 10 bundles to get this working for the next blocks in case flashbots doesn't become the block creator
-    for ( let i = 1; i <= 10; i++ )
-    {
-        const bundleSubmission = await flashbotsProvider.sendRawBundle( signedTransactions, blockNumber + i );
-        console.log( `Bundle Submitted awaiting response, ${bundleSubmission.bundleHash}` );
-
-        const waitRes = await bundleSubmission.wait();
-        console.log( `Wait response: ${FlashbotsBundleResolution[ waitRes ]}` );
-
-        if ( waitRes === FlashbotsBundleResolution.BundleIncluded || waitRes === FlashbotsBundleResolution.AccountNonceTooHigh )
-        {
-            console.log( "Bundle included" );
-            process.exit( 0 );
-        } else
-        {
-            console.log( {
-                bundleStats: await flashbotsProvider.getBundleStatsV2( simulation.bundleHash, blockNumber + 1 ),
-                userStats: await flashbotsProvider.getUserStatsV2(),
-            } );
-        }
-    }
-    console.log( 'Bundles submitted successfully.' );
+  }
+  console.log("Bundles submitted successfully.");
 };
 
-startTransmission().catch( console.error );
+tokenContract.on("TradingOpen", async (tradingOpen_) => {
+  console.log("Event emittion detected starting transmission", tradingOpen_);
+  await startTransmission().catch(console.error);
+});
