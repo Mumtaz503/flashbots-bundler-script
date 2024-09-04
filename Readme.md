@@ -1,0 +1,6 @@
+txhash1 = 0x22a6ae0aa4a9d248dc07d0203ff42b5eab6d597d07d58bc19b4c4f01b1bc8ace | block-position #0
+txhash2 = 0x53a20d2aa57777787598fcdbfc7b5fb484d84941ac937893361585354b364d88 | block-position #1
+
+Sepolia TOKEN = 0x2317459F4c2d80bbeb5127d3d91ed3dCd09b42f0
+Sepolia uniswapV2Router2 = 0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008
+Sepolia WETH = 0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9

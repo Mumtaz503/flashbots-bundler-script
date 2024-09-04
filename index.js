@@ -9,7 +9,7 @@ const provider = new ethers.JsonRpcProvider(process.env.SEPOLIA_RPC_URL);
 const abiCoder = AbiCoder.defaultAbiCoder();
 const privateKeys = [process.env.PRIVATE_KEY_1, process.env.PRIVATE_KEY_2];
 
-const TOKEN = "0x8603e8AEb8cAf32E630BcEBB856e68e030D31078";
+const TOKEN = "0x2317459F4c2d80bbeb5127d3d91ed3dCd09b42f0";
 const TOKEN_ABI = ["event TradingOpen(bool tradingOpen_)"];
 const WETH = "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9";
 const UNISWAP_ROUTER_ADDRESS = "0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008";
@@ -33,7 +33,7 @@ const startTransmission = async () => {
 
   const GWEI = BigInt(10 ** 10);
   const LEGACY_GAS_PRICE = GWEI * 30n;
-  const PRIORITY_FEE = GWEI * 20n;
+  const PRIORITY_FEE = GWEI * 70n;
   const blockNumber = await provider.getBlockNumber();
   const block = await provider.getBlock();
   const maxBaseFeeInFutureBlock =
@@ -86,7 +86,7 @@ const startTransmission = async () => {
     console.log(`Simulation success. Block Number ${blockNumber}`);
   }
 
-  for (let i = 1; i <= 2; i++) {
+  for (let i = 1; i <= privateKeys.length; i++) {
     const bundleSubmission = await flashbotsProvider.sendRawBundle(
       signedTransactions,
       blockNumber + i
@@ -114,7 +114,10 @@ const startTransmission = async () => {
       });
     }
   }
-  console.log("Bundles submitted successfully.");
+  console.log(
+    "Bundles submitted successfully. Either wait for the inclusion or re-run the script with increased PRIORITY_FEE"
+  );
+  process.exit(0);
 };
 
 tokenContract.on("TradingOpen", async (tradingOpen_) => {
