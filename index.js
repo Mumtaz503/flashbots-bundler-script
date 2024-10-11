@@ -20,7 +20,7 @@ const privateKeys = [
   process.env.PRIVATE_KEY_10,
 ];
 
-const TOKEN = "0xf74105e4dB0ba8D0738632454C55e60A3570D3D3";
+const TOKEN = "0x4648545f2aDd6de5991b606d4f9a40d7901Ad612";
 const TOKEN_ABI = [
   {
     name: "openTrading",
@@ -70,7 +70,7 @@ const startTransmission = async (blockNumber) => {
 
     let totalGasUsed = BigInt(0);
 
-    const transactions = signers.map((signer) => {
+    const transactions = signers.slice(1).map((signer) => {
       const data = abiCoder.encode(
         ["uint256", "address[]", "address", "uint256"],
         [
