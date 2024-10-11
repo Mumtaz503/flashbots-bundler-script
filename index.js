@@ -14,9 +14,13 @@ const privateKeys = [
   process.env.PRIVATE_KEY_4,
   process.env.PRIVATE_KEY_5,
   process.env.PRIVATE_KEY_6,
+  process.env.PRIVATE_KEY_7,
+  process.env.PRIVATE_KEY_8,
+  process.env.PRIVATE_KEY_9,
+  process.env.PRIVATE_KEY_10,
 ];
 
-const TOKEN = "0x0816C1288683E9EA230aB155810d5Dd08e046ccB";
+const TOKEN = "0x80c156dCc4Da7236f88F8B87Bfce190a6683CF68";
 const TOKEN_ABI = ["event TradingOpen(bool tradingOpen_)"];
 const WETH = "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9";
 const UNISWAP_ROUTER_ADDRESS = "0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008";
