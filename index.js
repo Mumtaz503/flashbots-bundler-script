@@ -20,8 +20,29 @@ const privateKeys = [
   process.env.PRIVATE_KEY_10,
 ];
 
-const TOKEN = "0x80c156dCc4Da7236f88F8B87Bfce190a6683CF68";
-const TOKEN_ABI = ["event TradingOpen(bool tradingOpen_)"];
+const TOKEN = "0xf74105e4dB0ba8D0738632454C55e60A3570D3D3";
+const TOKEN_ABI = [
+  {
+    name: "openTrading",
+    type: "function",
+    inputs: [],
+    outputs: [],
+    stateMutability: "nonpayable",
+    payable: true,
+  },
+  {
+    name: "isTradingOpen",
+    type: "function",
+    inputs: [],
+    outputs: [
+      {
+        name: "",
+        type: "bool",
+      },
+    ],
+    stateMutability: "view",
+  },
+];
 const WETH = "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9";
 const UNISWAP_ROUTER_ADDRESS = "0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008";
 const funcSelector = ethers
@@ -48,6 +69,7 @@ const startTransmission = async (blockNumber) => {
     const blockGasLimit = block.gasLimit;
 
     let totalGasUsed = BigInt(0);
+
     const transactions = signers.map((signer) => {
       const data = abiCoder.encode(
         ["uint256", "address[]", "address", "uint256"],
@@ -67,7 +89,7 @@ const startTransmission = async (blockNumber) => {
         data: txData,
         chainId: 11155111,
         gasLimit: 500000,
-        value: ethers.parseEther("0.001"),
+        value: ethers.parseEther("0.0001"),
       };
 
       totalGasUsed += BigInt(swapTransaction.gasLimit);
@@ -77,6 +99,8 @@ const startTransmission = async (blockNumber) => {
       };
     });
 
+    const allTransactions = [...transactions];
+
     const remainingBlockGas = blockGasLimit - totalGasUsed;
     if (remainingBlockGas < 0) {
       console.error(
@@ -85,7 +109,9 @@ const startTransmission = async (blockNumber) => {
       return;
     }
 
-    const signedTransactions = await flashbotsProvider.signBundle(transactions);
+    const signedTransactions = await flashbotsProvider.signBundle(
+      allTransactions
+    );
     const simulation = await flashbotsProvider.simulate(
       signedTransactions,
       blockNumber + 1
@@ -133,6 +159,15 @@ provider.on("block", async (blockNumber) => {
   if (blockNumber !== lastBlockNumber) {
     lastBlockNumber = blockNumber;
     console.log(`New block mined: ${blockNumber}`);
+    const tradingEnabled = await tokenContract
+      .connect(signers[0])
+      .isTradingOpen();
+
+    if (tradingEnabled == false) {
+      console.log("Enabling trading...");
+      const tx = await tokenContract.connect(signers[0]).openTrading();
+      await tx.wait();
+    }
     await startTransmission(blockNumber).catch(console.error);
   }
 });
