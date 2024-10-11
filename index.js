@@ -13,14 +13,10 @@ const privateKeys = [
   process.env.PRIVATE_KEY_3,
   process.env.PRIVATE_KEY_4,
   process.env.PRIVATE_KEY_5,
-  // process.env.PRIVATE_KEY_6,
-  // process.env.PRIVATE_KEY_7,
-  // process.env.PRIVATE_KEY_8,
-  // process.env.PRIVATE_KEY_9,
-  // process.env.PRIVATE_KEY_10,
+  process.env.PRIVATE_KEY_6,
 ];
 
-const TOKEN = "0xa9A2900B51B4BFdA73BaC828A9E264852FB141b8";
+const TOKEN = "0x0816C1288683E9EA230aB155810d5Dd08e046ccB";
 const TOKEN_ABI = ["event TradingOpen(bool tradingOpen_)"];
 const WETH = "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9";
 const UNISWAP_ROUTER_ADDRESS = "0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008";
@@ -29,101 +25,85 @@ const funcSelector = ethers
   .slice(0, 10);
 
 const tokenContract = new ethers.Contract(TOKEN, TOKEN_ABI, provider);
-
 const signers = privateKeys.map(
   (privateKey) => new Wallet(privateKey, provider)
 );
 const sepoliaFlashbotsRelay = "https://relay-sepolia.flashbots.net";
 
-const startTransmission = async () => {
-  const flashbotsProvider = await FlashbotsBundleProvider.create(
-    provider,
-    signers[1],
-    sepoliaFlashbotsRelay
-  );
+let lastBlockNumber = null;
 
-  const GWEI = BigInt(10 ** 10);
-  const PRIORITY_FEE = GWEI * 70n;
-  const blockNumber = await provider.getBlockNumber();
-  const block = await provider.getBlock();
-  const maxBaseFeeInFutureBlock =
-    FlashbotsBundleProvider.getMaxBaseFeeInFutureBlock(block.baseFeePerGas, 6);
-
-  console.log(`Max fee in future Block: ${String(maxBaseFeeInFutureBlock)}`);
-
-  const blockGasLimit = block.gasLimit;
-  console.log(`Block Gas Limit: ${blockGasLimit.toString()}`);
-
-  let totalGasUsed = BigInt(0);
-
-  const transactions = signers.map((signer) => {
-    const data = abiCoder.encode(
-      ["uint256", "address[]", "address", "uint256"],
-      [
-        10,
-        [WETH, TOKEN],
-        signer.address,
-        Math.floor(Date.now() / 1000) + 60 * 20,
-      ]
+const startTransmission = async (blockNumber) => {
+  try {
+    const flashbotsProvider = await FlashbotsBundleProvider.create(
+      provider,
+      signers[1],
+      sepoliaFlashbotsRelay
     );
-    const txData = funcSelector + data.slice(2);
-    const swapTransaction = {
-      to: UNISWAP_ROUTER_ADDRESS,
-      type: 2,
-      maxFeePerGas: PRIORITY_FEE + maxBaseFeeInFutureBlock,
-      maxPriorityFeePerGas: PRIORITY_FEE,
-      data: txData,
-      chainId: 11155111,
-      gasLimit: 500000,
-      value: ethers.parseEther("0.01"),
-    };
 
-    totalGasUsed += BigInt(swapTransaction.gasLimit);
+    const block = await provider.getBlock(blockNumber);
+    const blockGasLimit = block.gasLimit;
 
-    return {
-      signer: signer,
-      transaction: swapTransaction,
-    };
-  });
+    let totalGasUsed = BigInt(0);
+    const transactions = signers.map((signer) => {
+      const data = abiCoder.encode(
+        ["uint256", "address[]", "address", "uint256"],
+        [
+          10,
+          [WETH, TOKEN],
+          signer.address,
+          Math.floor(Date.now() / 1000) + 60 * 20,
+        ]
+      );
+      const txData = funcSelector + data.slice(2);
+      const swapTransaction = {
+        to: UNISWAP_ROUTER_ADDRESS,
+        type: 2,
+        maxFeePerGas: block.baseFeePerGas + ethers.parseUnits("70", "gwei"),
+        maxPriorityFeePerGas: ethers.parseUnits("70", "gwei"),
+        data: txData,
+        chainId: 11155111,
+        gasLimit: 500000,
+        value: ethers.parseEther("0.001"),
+      };
 
-  console.log(`Total Gas Used by Bundle: ${totalGasUsed.toString()}`);
+      totalGasUsed += BigInt(swapTransaction.gasLimit);
+      return {
+        signer: signer,
+        transaction: swapTransaction,
+      };
+    });
 
-  if (totalGasUsed > blockGasLimit) {
-    console.error(
-      `Total gas usage exceeds the block's gas limit. Consider splitting the bundle.`
+    const remainingBlockGas = blockGasLimit - totalGasUsed;
+    if (remainingBlockGas < 0) {
+      console.error(
+        `Error: Total gas used by the bundle (${totalGasUsed}) exceeds the block gas limit (${blockGasLimit}). Exiting.`
+      );
+      return;
+    }
+
+    const signedTransactions = await flashbotsProvider.signBundle(transactions);
+    const simulation = await flashbotsProvider.simulate(
+      signedTransactions,
+      blockNumber + 1
     );
-    process.exit(1);
-  }
 
-  const signedTransactions = await flashbotsProvider.signBundle(transactions);
+    if (simulation.firstRevert) {
+      console.error(`Simulation Error: ${simulation.firstRevert.error}`);
+      return;
+    } else {
+      console.log(`Simulation success. Block Number ${blockNumber}`);
+    }
 
-  console.log("Date Before: ", new Date());
-  console.log("Running simulation");
-
-  const simulation = await flashbotsProvider.simulate(
-    signedTransactions,
-    blockNumber + 1
-  );
-  console.log("Date After: ", new Date());
-
-  if (simulation.firstRevert) {
-    console.error(`Simulation Error: ${simulation.firstRevert.error}`);
-    process.exit(0);
-  } else {
-    console.log(`Simulation success. Block Number ${blockNumber}`);
-  }
-
-  for (let i = 1; i <= privateKeys.length; i++) {
     const bundleSubmission = await flashbotsProvider.sendRawBundle(
       signedTransactions,
-      blockNumber + i
+      blockNumber + 1
     );
     console.log(
       `Bundle Submitted awaiting response, ${bundleSubmission.bundleHash}`
     );
 
     const waitRes = await bundleSubmission.wait();
-    console.log(`Wait response: ${FlashbotsBundleResolution[waitRes]}`);
+    console.log("Waiting for bundle response...");
 
     if (
       waitRes === FlashbotsBundleResolution.BundleIncluded ||
@@ -132,7 +112,7 @@ const startTransmission = async () => {
       console.log("Bundle included");
       process.exit(0);
     } else {
-      console.log({
+      console.log("Bundle not included. Stats:", {
         bundleStats: await flashbotsProvider.getBundleStatsV2(
           bundleSubmission.bundleHash,
           blockNumber + 1
@@ -140,14 +120,20 @@ const startTransmission = async () => {
         userStats: await flashbotsProvider.getUserStatsV2(),
       });
     }
+  } catch (error) {
+    console.error(`Error in startTransmission: ${error.message}`);
   }
-  console.log(
-    "Bundles submitted successfully. Either wait for the inclusion or re-run the script with increased PRIORITY_FEE"
-  );
-  process.exit(0);
 };
 
-tokenContract.on("TradingOpen", async (tradingOpen_) => {
-  console.log("Event emittion detected starting transmission", tradingOpen_);
-  await startTransmission().catch(console.error);
+provider.on("block", async (blockNumber) => {
+  if (blockNumber !== lastBlockNumber) {
+    lastBlockNumber = blockNumber;
+    console.log(`New block mined: ${blockNumber}`);
+    await startTransmission(blockNumber).catch(console.error);
+  }
 });
+
+// Check if the remaining block gas is less than the bundle execution gas
+// keep checking it until the appropriate gas is reached.
+// Then execute enable trading using ethers.js
+// Then execute the script
