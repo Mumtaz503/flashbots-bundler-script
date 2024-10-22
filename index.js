@@ -5,7 +5,13 @@ const {
 } = require("@flashbots/ethers-provider-bundle");
 require("dotenv").config();
 
+/**
+ * Use the following RPC url for mainnnet
+ *
+ * https://mainnet.infura.io/v3/918151ca535442e98bfb35faa831defb
+ */
 const provider = new ethers.JsonRpcProvider(process.env.SEPOLIA_RPC_URL);
+
 const abiCoder = AbiCoder.defaultAbiCoder();
 const privateKeys = [
   process.env.PRIVATE_KEY_1,
@@ -20,7 +26,17 @@ const privateKeys = [
   process.env.PRIVATE_KEY_10,
 ];
 
-const TOKEN = "0x4648545f2aDd6de5991b606d4f9a40d7901Ad612";
+/**
+ * Use the contract address with the `openTrading()` function.
+ * Change the name if there's `enableTrading()`.
+ * Make sure that the contract has `isTradingOpen` view function.
+ * It should look like this:
+ * 
+ *    function isTradingOpen() public view returns (bool) {
+        return tradingOpen;
+      }
+ */
+const TOKEN = "0xe50CB0610598d9C5eA62C32Cd76194338Aa8dee2";
 const TOKEN_ABI = [
   {
     name: "openTrading",
@@ -28,7 +44,6 @@ const TOKEN_ABI = [
     inputs: [],
     outputs: [],
     stateMutability: "nonpayable",
-    payable: true,
   },
   {
     name: "isTradingOpen",
@@ -43,7 +58,14 @@ const TOKEN_ABI = [
     stateMutability: "view",
   },
 ];
+
+/**
+ * Use the original WETH address from UniswapV2Router2
+ */
 const WETH = "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9";
+/**
+ * Use the original Router address
+ */
 const UNISWAP_ROUTER_ADDRESS = "0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008";
 const funcSelector = ethers
   .id("swapExactETHForTokens(uint256,address[],address,uint256)")
@@ -53,6 +75,10 @@ const tokenContract = new ethers.Contract(TOKEN, TOKEN_ABI, provider);
 const signers = privateKeys.map(
   (privateKey) => new Wallet(privateKey, provider)
 );
+
+/**
+ * Use this relay for mainnet "https://rpc.flashbots.net/fast"
+ */
 const sepoliaFlashbotsRelay = "https://relay-sepolia.flashbots.net";
 
 let lastBlockNumber = null;
@@ -70,6 +96,15 @@ const startTransmission = async (blockNumber) => {
 
     let totalGasUsed = BigInt(0);
 
+    const GWEI = BigInt(10 ** 10);
+    const PRIORITY_FEE = GWEI * 13n;
+
+    const maxBaseFeeInFutureBlock =
+      FlashbotsBundleProvider.getMaxBaseFeeInFutureBlock(
+        block.baseFeePerGas,
+        6
+      );
+
     const transactions = signers.slice(1).map((signer) => {
       const data = abiCoder.encode(
         ["uint256", "address[]", "address", "uint256"],
@@ -84,10 +119,10 @@ const startTransmission = async (blockNumber) => {
       const swapTransaction = {
         to: UNISWAP_ROUTER_ADDRESS,
         type: 2,
-        maxFeePerGas: block.baseFeePerGas + ethers.parseUnits("70", "gwei"),
-        maxPriorityFeePerGas: ethers.parseUnits("70", "gwei"),
+        maxFeePerGas: PRIORITY_FEE + maxBaseFeeInFutureBlock,
+        maxPriorityFeePerGas: PRIORITY_FEE,
         data: txData,
-        chainId: 11155111,
+        chainId: 11155111, //Use chainId as 1 for mainnet
         gasLimit: 500000,
         value: ethers.parseEther("0.0001"),
       };
@@ -99,8 +134,6 @@ const startTransmission = async (blockNumber) => {
       };
     });
 
-    const allTransactions = [...transactions];
-
     const remainingBlockGas = blockGasLimit - totalGasUsed;
     if (remainingBlockGas < 0) {
       console.error(
@@ -109,13 +142,13 @@ const startTransmission = async (blockNumber) => {
       return;
     }
 
-    const signedTransactions = await flashbotsProvider.signBundle(
-      allTransactions
-    );
+    const signedTransactions = await flashbotsProvider.signBundle(transactions);
     const simulation = await flashbotsProvider.simulate(
       signedTransactions,
       blockNumber + 1
     );
+
+    console.log("gasPrice: ", simulation.results[0].gasPrice);
 
     if (simulation.firstRevert) {
       console.error(`Simulation Error: ${simulation.firstRevert.error}`);
@@ -155,14 +188,13 @@ const startTransmission = async (blockNumber) => {
   }
 };
 
-provider.on("block", async (blockNumber) => {
+provider.once("block", async (blockNumber) => {
   if (blockNumber !== lastBlockNumber) {
     lastBlockNumber = blockNumber;
     console.log(`New block mined: ${blockNumber}`);
     const tradingEnabled = await tokenContract
       .connect(signers[0])
       .isTradingOpen();
-
     if (tradingEnabled == false) {
       console.log("Enabling trading...");
       const tx = await tokenContract.connect(signers[0]).openTrading();
@@ -171,8 +203,3 @@ provider.on("block", async (blockNumber) => {
     await startTransmission(blockNumber).catch(console.error);
   }
 });
-
-// Check if the remaining block gas is less than the bundle execution gas
-// keep checking it until the appropriate gas is reached.
-// Then execute enable trading using ethers.js
-// Then execute the script
