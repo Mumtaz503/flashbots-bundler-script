@@ -86,7 +86,7 @@ let lastBlockNumber = null;
 const GWEI = BigInt(10 ** 9);
 let PRIORITY_FEE = GWEI * 13n;
 
-const startTransmission = async (blockNumber, retry = false) => {
+const startTransmission = async (blockNumber) => {
   try {
     const flashbotsProvider = await FlashbotsBundleProvider.create(
       provider,
@@ -181,14 +181,6 @@ const startTransmission = async (blockNumber, retry = false) => {
         ),
         userStats: await flashbotsProvider.getUserStatsV2(),
       });
-
-      if (!retry) {
-        console.log("Retrying with lower PRIORITY_FEE...");
-        PRIORITY_FEE = GWEI * 10n;
-        await startTransmission(blockNumber, true);
-      } else {
-        console.error("Bundle still not included after retry.");
-      }
     }
   } catch (error) {
     console.error(`Error in startTransmission: ${error.message}`);
