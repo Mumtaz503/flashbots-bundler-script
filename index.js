@@ -36,7 +36,7 @@ const privateKeys = [
         return tradingOpen;
       }
  */
-const TOKEN = "0xe50CB0610598d9C5eA62C32Cd76194338Aa8dee2";
+const TOKEN = "0x203E2f1bbcB77A2d73133b1fFF2Dd8daCC892E7C";
 const TOKEN_ABI = [
   {
     name: "openTrading",
@@ -83,7 +83,10 @@ const sepoliaFlashbotsRelay = "https://relay-sepolia.flashbots.net";
 
 let lastBlockNumber = null;
 
-const startTransmission = async (blockNumber) => {
+const GWEI = BigInt(10 ** 9);
+let PRIORITY_FEE = GWEI * 13n;
+
+const startTransmission = async (blockNumber, retry = false) => {
   try {
     const flashbotsProvider = await FlashbotsBundleProvider.create(
       provider,
@@ -95,9 +98,6 @@ const startTransmission = async (blockNumber) => {
     const blockGasLimit = block.gasLimit;
 
     let totalGasUsed = BigInt(0);
-
-    const GWEI = BigInt(10 ** 10);
-    const PRIORITY_FEE = GWEI * 13n;
 
     const maxBaseFeeInFutureBlock =
       FlashbotsBundleProvider.getMaxBaseFeeInFutureBlock(
@@ -165,15 +165,14 @@ const startTransmission = async (blockNumber) => {
       `Bundle Submitted awaiting response, ${bundleSubmission.bundleHash}`
     );
 
-    const waitRes = await bundleSubmission.wait();
+    const waitRes = await bundleSubmission.wait(1);
     console.log("Waiting for bundle response...");
 
-    if (
-      waitRes === FlashbotsBundleResolution.BundleIncluded ||
-      waitRes === FlashbotsBundleResolution.AccountNonceTooHigh
-    ) {
+    if (waitRes === FlashbotsBundleResolution.BundleIncluded) {
       console.log("Bundle included");
       process.exit(0);
+    } else if (waitRes === FlashbotsBundleResolution.AccountNonceTooHigh) {
+      console.log("Account nonce too high");
     } else {
       console.log("Bundle not included. Stats:", {
         bundleStats: await flashbotsProvider.getBundleStatsV2(
@@ -182,13 +181,21 @@ const startTransmission = async (blockNumber) => {
         ),
         userStats: await flashbotsProvider.getUserStatsV2(),
       });
+
+      if (!retry) {
+        console.log("Retrying with lower PRIORITY_FEE...");
+        PRIORITY_FEE = GWEI * 10n;
+        await startTransmission(blockNumber, true);
+      } else {
+        console.error("Bundle still not included after retry.");
+      }
     }
   } catch (error) {
     console.error(`Error in startTransmission: ${error.message}`);
   }
 };
 
-provider.once("block", async (blockNumber) => {
+provider.on("block", async (blockNumber) => {
   if (blockNumber !== lastBlockNumber) {
     lastBlockNumber = blockNumber;
     console.log(`New block mined: ${blockNumber}`);
@@ -198,7 +205,7 @@ provider.once("block", async (blockNumber) => {
     if (tradingEnabled == false) {
       console.log("Enabling trading...");
       const tx = await tokenContract.connect(signers[0]).openTrading();
-      await tx.wait();
+      await tx.wait(1);
     }
     await startTransmission(blockNumber).catch(console.error);
   }
