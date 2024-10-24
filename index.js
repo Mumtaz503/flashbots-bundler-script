@@ -90,7 +90,7 @@ const startTransmission = async (blockNumber) => {
   try {
     const flashbotsProvider = await FlashbotsBundleProvider.create(
       provider,
-      signers[1],
+      signers[1], //Use the wallet that is in the bundle sending the transaction
       sepoliaFlashbotsRelay
     );
 
