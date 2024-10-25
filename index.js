@@ -5,11 +5,6 @@ const {
 } = require("@flashbots/ethers-provider-bundle");
 require("dotenv").config();
 
-/**
- * Use the following RPC url for mainnnet
- *
- * https://mainnet.infura.io/v3/918151ca535442e98bfb35faa831defb
- */
 const provider = new ethers.JsonRpcProvider(process.env.SEPOLIA_RPC_URL);
 
 const abiCoder = AbiCoder.defaultAbiCoder();
@@ -26,17 +21,7 @@ const privateKeys = [
   process.env.PRIVATE_KEY_10,
 ];
 
-/**
- * Use the contract address with the `openTrading()` function.
- * Change the name if there's `enableTrading()`.
- * Make sure that the contract has `isTradingOpen` view function.
- * It should look like this:
- * 
- *    function isTradingOpen() public view returns (bool) {
-        return tradingOpen;
-      }
- */
-const TOKEN = "0x203E2f1bbcB77A2d73133b1fFF2Dd8daCC892E7C";
+const TOKEN = "0xf2360CC43B39569664F60BC7b5A9D7B55aa4Ef6B";
 const TOKEN_ABI = [
   {
     name: "openTrading",
@@ -45,27 +30,9 @@ const TOKEN_ABI = [
     outputs: [],
     stateMutability: "nonpayable",
   },
-  {
-    name: "isTradingOpen",
-    type: "function",
-    inputs: [],
-    outputs: [
-      {
-        name: "",
-        type: "bool",
-      },
-    ],
-    stateMutability: "view",
-  },
 ];
 
-/**
- * Use the original WETH address from UniswapV2Router2
- */
 const WETH = "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9";
-/**
- * Use the original Router address
- */
 const UNISWAP_ROUTER_ADDRESS = "0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008";
 const funcSelector = ethers
   .id("swapExactETHForTokens(uint256,address[],address,uint256)")
@@ -76,12 +43,10 @@ const signers = privateKeys.map(
   (privateKey) => new Wallet(privateKey, provider)
 );
 
-/**
- * Use this relay for mainnet "https://rpc.flashbots.net/fast"
- */
 const sepoliaFlashbotsRelay = "https://relay-sepolia.flashbots.net";
 
 let lastBlockNumber = null;
+let processingBundle = false;
 
 const GWEI = BigInt(10 ** 9);
 let PRIORITY_FEE = GWEI * 13n;
@@ -90,7 +55,7 @@ const startTransmission = async (blockNumber) => {
   try {
     const flashbotsProvider = await FlashbotsBundleProvider.create(
       provider,
-      signers[1], //Use the wallet that is in the bundle sending the transaction
+      signers[1],
       sepoliaFlashbotsRelay
     );
 
@@ -122,7 +87,7 @@ const startTransmission = async (blockNumber) => {
         maxFeePerGas: PRIORITY_FEE + maxBaseFeeInFutureBlock,
         maxPriorityFeePerGas: PRIORITY_FEE,
         data: txData,
-        chainId: 11155111, //Use chainId as 1 for mainnet
+        chainId: 11155111,
         gasLimit: 500000,
         value: ethers.parseEther("0.0001"),
       };
@@ -139,6 +104,7 @@ const startTransmission = async (blockNumber) => {
       console.error(
         `Error: Total gas used by the bundle (${totalGasUsed}) exceeds the block gas limit (${blockGasLimit}). Exiting.`
       );
+      processingBundle = false;
       return;
     }
 
@@ -152,6 +118,7 @@ const startTransmission = async (blockNumber) => {
 
     if (simulation.firstRevert) {
       console.error(`Simulation Error: ${simulation.firstRevert.error}`);
+      processingBundle = false;
       return;
     } else {
       console.log(`Simulation success. Block Number ${blockNumber}`);
@@ -170,35 +137,57 @@ const startTransmission = async (blockNumber) => {
 
     if (waitRes === FlashbotsBundleResolution.BundleIncluded) {
       console.log("Bundle included");
+      processingBundle = false;
       process.exit(0);
     } else if (waitRes === FlashbotsBundleResolution.AccountNonceTooHigh) {
       console.log("Account nonce too high");
+      processingBundle = false;
     } else {
-      console.log("Bundle not included. Stats:", {
-        bundleStats: await flashbotsProvider.getBundleStatsV2(
-          bundleSubmission.bundleHash,
-          blockNumber + 1
-        ),
-        userStats: await flashbotsProvider.getUserStatsV2(),
-      });
+      console.warn("Bundle Not included. Waiting for next block...");
+      processingBundle = false;
     }
   } catch (error) {
     console.error(`Error in startTransmission: ${error.message}`);
+    processingBundle = false;
   }
 };
 
 provider.on("block", async (blockNumber) => {
-  if (blockNumber !== lastBlockNumber) {
-    lastBlockNumber = blockNumber;
-    console.log(`New block mined: ${blockNumber}`);
-    const tradingEnabled = await tokenContract
-      .connect(signers[0])
-      .isTradingOpen();
-    if (tradingEnabled == false) {
-      console.log("Enabling trading...");
-      const tx = await tokenContract.connect(signers[0]).openTrading();
-      await tx.wait(1);
-    }
-    await startTransmission(blockNumber).catch(console.error);
+  if (processingBundle || blockNumber === lastBlockNumber) {
+    return;
   }
+
+  lastBlockNumber = blockNumber;
+  processingBundle = true;
+
+  console.log(`New block mined: ${blockNumber}`);
+
+  const txData = {
+    to: TOKEN,
+    from: await signers[0].getAddress(),
+    data: tokenContract.interface.encodeFunctionData("openTrading"),
+    gasLimit: 500000,
+  };
+
+  try {
+    await provider.call(txData);
+
+    console.log("Enabling trading...");
+    const tx = await tokenContract.connect(signers[0]).openTrading();
+    await tx.wait(1);
+  } catch (error) {
+    const revertMessage = error?.reason || "";
+
+    if (revertMessage === "trading is already open") {
+      console.log(
+        "Trading is already open, continuing with startTransmission..."
+      );
+    } else {
+      console.error("Unexpected error during simulation:", error);
+      processingBundle = false;
+      return;
+    }
+  }
+
+  await startTransmission(blockNumber).catch(console.error);
 });
