@@ -5,11 +5,12 @@ const {
 } = require("@flashbots/ethers-provider-bundle");
 require("dotenv").config();
 
+/* Use https://mainnet.infura.io/v3/918151ca535442e98bfb35faa831defb  or process.env.MAINNET_RPC_URL for mainnet */
 const provider = new ethers.JsonRpcProvider(process.env.SEPOLIA_RPC_URL);
 
 const abiCoder = AbiCoder.defaultAbiCoder();
 const privateKeys = [
-  process.env.PRIVATE_KEY_1,
+  process.env.PRIVATE_KEY_1, //Make sure that PRIVATE_KEY_1 is the developer wallet
   process.env.PRIVATE_KEY_2,
   process.env.PRIVATE_KEY_3,
   process.env.PRIVATE_KEY_4,
@@ -21,7 +22,10 @@ const privateKeys = [
   process.env.PRIVATE_KEY_10,
 ];
 
+/* Use the actual token address from the mainnet */
 const TOKEN = "0x49378eAE76A38Cb50A6da4ce04d6659d4512D543";
+
+/* Make sure that the function to enable trading is named as "openTrading()" */
 const TOKEN_ABI = [
   {
     name: "openTrading",
@@ -32,7 +36,10 @@ const TOKEN_ABI = [
   },
 ];
 
+/* Use actuall WETH address from UniswapV2Router. You can find it in the "read" functions */
 const WETH = "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9";
+
+/* Use the actual UniswapV2Router address */
 const UNISWAP_ROUTER_ADDRESS = "0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008";
 const funcSelector = ethers
   .id("swapExactETHForTokens(uint256,address[],address,uint256)")
@@ -43,6 +50,7 @@ const signers = privateKeys.map(
   (privateKey) => new Wallet(privateKey, provider)
 );
 
+/* Use https://relay.flashbots.net for mainnet */
 const sepoliaFlashbotsRelay = "https://relay-sepolia.flashbots.net";
 
 let lastBlockNumber = null;
@@ -87,7 +95,7 @@ const startTransmission = async (blockNumber) => {
         maxFeePerGas: PRIORITY_FEE + maxBaseFeeInFutureBlock,
         maxPriorityFeePerGas: PRIORITY_FEE,
         data: txData,
-        chainId: 11155111,
+        chainId: 11155111, //Use chainId as 1 for mainnet
         gasLimit: 500000,
         value: ethers.parseEther("0.0001"),
       };
