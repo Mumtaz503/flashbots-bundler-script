@@ -21,7 +21,7 @@ const privateKeys = [
   process.env.PRIVATE_KEY_10,
 ];
 
-const TOKEN = "0xf2360CC43B39569664F60BC7b5A9D7B55aa4Ef6B";
+const TOKEN = "0x49378eAE76A38Cb50A6da4ce04d6659d4512D543";
 const TOKEN_ABI = [
   {
     name: "openTrading",
@@ -162,28 +162,21 @@ provider.on("block", async (blockNumber) => {
 
   console.log(`New block mined: ${blockNumber}`);
 
-  const txData = {
-    to: TOKEN,
-    from: await signers[0].getAddress(),
-    data: tokenContract.interface.encodeFunctionData("openTrading"),
-    gasLimit: 500000,
-  };
-
   try {
-    await provider.call(txData);
-
-    console.log("Enabling trading...");
+    console.log("Attempting to enable trading...");
     const tx = await tokenContract.connect(signers[0]).openTrading();
     await tx.wait(1);
+    console.log("Trading enabled successfully.");
   } catch (error) {
     const revertMessage = error?.reason || "";
 
-    if (revertMessage === "trading is already open") {
-      console.log(
-        "Trading is already open, continuing with startTransmission..."
-      );
+    if (
+      revertMessage === "trading is already open" ||
+      error.code === "CALL_EXCEPTION"
+    ) {
+      console.log("Trading is already open, continuing with bundle...");
     } else {
-      console.error("Unexpected error during simulation:", error);
+      console.error("Unexpected error during transaction:", error);
       processingBundle = false;
       return;
     }
