@@ -57,7 +57,7 @@ let lastBlockNumber = null;
 let processingBundle = false;
 
 const GWEI = BigInt(10 ** 9);
-let PRIORITY_FEE = GWEI * 13n;
+let PRIORITY_FEE = GWEI * 10n;
 
 const startTransmission = async (blockNumber) => {
   try {
